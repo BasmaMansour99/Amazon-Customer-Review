@@ -1,0 +1,11 @@
+streamlit
+pandas
+numpy
+sentence-transformers
+requests
+langchain-core
+langchain-text-splitters
+langchain-huggingface
+langchain-chroma
+chromadb
+langchain-openai
