@@ -43,22 +43,28 @@ TOP_K = 5
 
 api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY"))
 
-# Auto Extract / Build DB Helper Function
+# Helper Function: Auto Unzip and Build Chroma DB
 def prepare_chroma_db():
-    if os.path.exists(DB_PATH):
+    # 1. Check if DB exists directly
+    if os.path.exists(DB_PATH) and len(os.listdir(DB_PATH)) > 0:
         return DB_PATH
-    
-    # 1. Unzip if data.zip exists
+
+    # Create data directory if not created
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+    # 2. Extract data.zip if present
     if os.path.exists(ZIP_PATH):
         with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
             zip_ref.extractall(BASE_DIR)
-        if os.path.exists(DB_PATH):
+        
+        # Check if DB was extracted inside
+        if os.path.exists(DB_PATH) and len(os.listdir(DB_PATH)) > 0:
             return DB_PATH
 
-    # 2. If no pre-built DB, build it from CSV files in data directory
+    # 3. Build Vector DB from CSV files in DATA_DIR
     csv_files = [f for f in os.listdir(DATA_DIR) if f.endswith('.csv')] if os.path.exists(DATA_DIR) else []
     if csv_files:
-        st.info("⚡ First time setup: Building Vector Database... Please wait.")
+        st.info("⚡ First time setup: Building Vector Database from CSVs... Please wait.")
         embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
         documents = []
         for file in csv_files:
@@ -103,6 +109,8 @@ def load_llm(api_key):
         google_api_key=api_key
     )
 
+retriever = load_retriever()
+
 # ==========================================
 # Sidebar Dashboard
 # ==========================================
@@ -115,8 +123,7 @@ with st.sidebar:
     else:
         st.error("🔴 API Key Missing", icon="🚨")
         
-    db_active = os.path.exists(DB_PATH) or os.path.exists(ZIP_PATH)
-    if db_active:
+    if retriever is not None:
         st.success("🟢 Vector DB Ready", icon="🗄️")
     else:
         st.error("🔴 Vector DB Missing", icon="⚠️")
@@ -163,13 +170,11 @@ Answer:"""
 st.markdown('<div class="main-title">🛒 Amazon Product RAG Intelligence</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">AI-Powered Insights Grounded Strictly in Real Customer Reviews</div>', unsafe_allow_html=True)
 
-retriever = load_retriever()
-
 # Validation Checks
 if not api_key:
     st.warning("⚠️ **System Not Ready:** Please configure `GEMINI_API_KEY` in Streamlit Cloud Secrets to proceed.")
 elif retriever is None:
-    st.error("⚠️ **Database Error:** Could not initialize Chroma DB. Make sure data files exist in `data/` directory or `data.zip` is present.")
+    st.error("⚠️ **Database Error:** Could not initialize Chroma DB. Extracting data.zip failed or contains no valid files.")
 else:
     if "messages" not in st.session_state:
         st.session_state.messages = []
