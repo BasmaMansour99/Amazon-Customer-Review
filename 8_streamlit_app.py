@@ -40,14 +40,14 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 DB_PATH = os.path.join(DATA_DIR, "chroma_db")
 ZIP_PATH = os.path.join(BASE_DIR, "data.zip")
 
-# مسارات اللوجو المتاحة
+# Available logo paths
 LOGO_PATH = os.path.join(BASE_DIR, "assets", "logo.png")
 LOGO_ROOT_PATH = os.path.join(BASE_DIR, "logo.png")
 
-TOP_K = 5
+# Increased TOP_K to retrieve more comprehensive context from the dataset
+TOP_K = 10
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
-ALL_PRODUCTS_LABEL = "All products"
 
 REQUIRED_COLUMNS = [
     "id", "name", "asins", "brand", "categories",
@@ -55,11 +55,12 @@ REQUIRED_COLUMNS = [
     "reviews.title", "reviews.text", "reviews.username",
 ]
 
+# Suggested reference questions grounded in dataset contents
 SUGGESTED_QUESTIONS_GENERAL = [
-    "Which product has the most positive reviews?",
-    "What are the top complaints across all products?",
-    "Compare sentiment between two brands",
-    "What percentage of reviews are 5-star overall?",
+    "What do parents say about the Fire Kids Edition Tablet?",
+    "How do users describe the screen and reading experience on Kindle Paperwhite?",
+    "What are the main complaints regarding battery life or SD cards on Fire Tablets?",
+    "How is Alexa used on Amazon Echo and Amazon Tap devices?",
 ]
 
 def get_logo_path():
@@ -220,27 +221,7 @@ def load_llm(_api_key):
     return ChatGroq(model=GROQ_MODEL_NAME, groq_api_key=_api_key, temperature=0.2)
 
 
-@st.cache_data(show_spinner=False)
-def get_product_list(_vector_store):
-    try:
-        result = _vector_store.get(include=["metadatas"])
-        names = {
-            (m.get("product") or "").strip()
-            for m in result.get("metadatas", [])
-        }
-        names.discard("")
-        names.discard("Unknown")
-        return sorted(names)
-    except Exception:
-        return []
-
-
-def retrieve(vector_store, query, product_filter=None, k=TOP_K):
-    if product_filter and product_filter != ALL_PRODUCTS_LABEL:
-        try:
-            return vector_store.similarity_search(query, k=k, filter={"product": product_filter})
-        except Exception:
-            pass
+def retrieve(vector_store, query, k=TOP_K):
     return vector_store.similarity_search(query, k=k)
 
 
@@ -251,13 +232,12 @@ def build_grounded_prompt(query, docs):
     return f"""You are AutoAnalyst AI, an assistant that answers questions about
 Amazon products using ONLY the customer review excerpts provided below.
 
-Rules:
+Strict Rules:
 - Answer strictly using the information contained in the reviews below.
 - Do not use outside knowledge or make assumptions beyond what is written.
-- If the reviews do not contain enough information to answer the question,
-  respond with exactly: Insufficient information.
+- If the question asks about a non-Amazon product (e.g., Apple iPad Pro, Samsung Galaxy) or features not directly evaluated in the reviews, answer ONLY with: Insufficient information.
+- If the reviews do not contain enough specific details to directly answer the question, respond with exactly: Insufficient information.
 - Keep the answer brief, highly accurate, and directly grounded in the review text.
-- Where useful, mention which product(s) the answer is based on.
 
 Question:
 {query}
@@ -288,7 +268,7 @@ with st.sidebar:
     else:
         st.image("https://upload.wikimedia.org/wikipedia/commons/a/a9/Amazon_logo.svg", width=140)
 
-    # زر New Chat إعادة تعيين المحادثة
+    # Button to start a new chat
     if st.button("➕ New Chat", use_container_width=True):
         st.session_state.messages = []
         st.session_state.pending_prompt = None
@@ -308,19 +288,6 @@ with st.sidebar:
         st.success("Vector DB Ready", icon="🗄️")
     else:
         st.error("Vector DB / Data Missing", icon="⚠️")
-
-    st.markdown("---")
-
-    st.markdown("### 🔎 Ask about a specific product")
-    product_options = [ALL_PRODUCTS_LABEL]
-    if vector_store is not None:
-        product_options += get_product_list(vector_store)
-    selected_product = st.selectbox(
-        "Product filter (optional)",
-        options=product_options,
-        index=0,
-        label_visibility="collapsed",
-    )
 
     st.markdown("---")
     st.markdown("### 💡 Quick Tips")
@@ -355,7 +322,7 @@ else:
     if "pending_prompt" not in st.session_state:
         st.session_state.pending_prompt = None
 
-    # الصفحة الرئيسية قبل بدء المحادثة
+    # Welcome screen before starting chat
     if not st.session_state.messages:
         if active_logo:
             col_a, col_b, col_c = st.columns([1, 2, 1])
@@ -364,15 +331,7 @@ else:
 
         st.markdown('<div class="try-asking-label">TRY ASKING</div>', unsafe_allow_html=True)
 
-        if selected_product != ALL_PRODUCTS_LABEL:
-            suggestions = [
-                f"What is the percentage of 5-star reviews for {selected_product}?",
-                f"What do customers complain about most for {selected_product}?",
-                f"Do customers recommend {selected_product}?",
-                f"Summarize the overall sentiment for {selected_product}",
-            ]
-        else:
-            suggestions = SUGGESTED_QUESTIONS_GENERAL
+        suggestions = SUGGESTED_QUESTIONS_GENERAL
 
         cols = st.columns(2)
         for i, q in enumerate(suggestions):
@@ -381,7 +340,7 @@ else:
                     st.session_state.pending_prompt = q
                     st.rerun()
 
-    # عرض سجّل المحادثة
+    # Display chat history
     for i, message in enumerate(st.session_state.messages):
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
@@ -401,7 +360,7 @@ else:
                             message["ar_translation"] = translate_to_arabic(message["content"], api_key)
                         st.rerun()
 
-    # إدخال السؤال
+    # Chat user input
     typed_query = st.chat_input("Ask a question about Amazon products (e.g., How is the battery life?)...")
     user_query = typed_query or st.session_state.pending_prompt
     st.session_state.pending_prompt = None
@@ -414,7 +373,7 @@ else:
         with st.chat_message("assistant"):
             with st.spinner("Analyzing customer reviews..."):
                 try:
-                    docs = retrieve(vector_store, user_query, product_filter=selected_product)
+                    docs = retrieve(vector_store, user_query)
                     prompt = build_grounded_prompt(user_query, docs)
 
                     if prompt is None:
