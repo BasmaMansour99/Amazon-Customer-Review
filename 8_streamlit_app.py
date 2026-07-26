@@ -113,7 +113,7 @@ def load_retriever():
 @st.cache_resource
 def load_llm(api_key):
     return ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
+        model="gemini-1.5-flash-latest",
         google_api_key=api_key
     )
 
