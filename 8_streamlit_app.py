@@ -5,7 +5,8 @@ Amazon Intelligence Assistant — RAG Chatbot
 Reads Amazon product review data (a pre-built Chroma vector DB, or a raw/cleaned
 CSV that it will index on first run), retrieves the most relevant review
 excerpts for a question, and asks an LLM (Groq) to answer strictly from those
-excerpts.
+excerpts. English is the app's native language; any answer can be translated
+to Arabic on demand with one click.
 
 Designed to be pushed to GitHub and deployed on Streamlit Community Cloud.
 """
@@ -48,11 +49,19 @@ LOGO_PATH = os.path.join(BASE_DIR, "assets", "logo.png")
 TOP_K = 5
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 GROQ_MODEL_NAME = "llama-3.3-70b-versatile"   # change here if you prefer another Groq model
+ALL_PRODUCTS_LABEL = "All products"
 
 REQUIRED_COLUMNS = [
     "id", "name", "asins", "brand", "categories",
     "reviews.didPurchase", "reviews.doRecommend", "reviews.rating",
     "reviews.title", "reviews.text", "reviews.username",
+]
+
+SUGGESTED_QUESTIONS_GENERAL = [
+    "Which product has the most positive reviews?",
+    "What are the top complaints across all products?",
+    "Compare sentiment between two brands",
+    "What percentage of reviews are 5-star overall?",
 ]
 
 # ==========================================
@@ -75,13 +84,28 @@ st.markdown("""
         -webkit-text-fill-color: transparent;
         margin-bottom: 0.2rem;
     }
-    .sub-title { color: #94a3b8; font-size: 1rem; margin-bottom: 1.6rem; }
+    .sub-title { color: #94a3b8; font-size: 1rem; margin-bottom: 1.4rem; }
     section[data-testid="stSidebar"] {
         background-color: #111827;
         border-right: 1px solid #1f2937;
     }
     .stChatMessage { border-radius: 14px; }
     .stExpander { border: 1px solid #1f2937 !important; border-radius: 10px; }
+    .try-asking-label {
+        color: #94a3b8; font-size: 0.8rem; font-weight: 700;
+        letter-spacing: 0.05em; margin-bottom: 0.4rem;
+    }
+    div[data-testid="stButton"] > button {
+        border: 1px solid #334155;
+        background-color: #1e293b;
+        color: #f8fafc;
+        border-radius: 10px;
+        text-align: left;
+    }
+    div[data-testid="stButton"] > button:hover {
+        border-color: #ff9900;
+        color: #ff9900;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -188,13 +212,12 @@ def load_embedding_model():
 
 
 @st.cache_resource(show_spinner=False)
-def load_retriever():
+def load_vector_store():
     embedding_model = load_embedding_model()
     db_path = prepare_chroma_db(embedding_model)
     if not db_path:
         return None
-    vector_store = Chroma(persist_directory=db_path, embedding_function=embedding_model)
-    return vector_store.as_retriever(search_kwargs={"k": TOP_K})
+    return Chroma(persist_directory=db_path, embedding_function=embedding_model)
 
 
 @st.cache_resource(show_spinner=False)
@@ -202,8 +225,33 @@ def load_llm(_api_key):
     return ChatGroq(model=GROQ_MODEL_NAME, groq_api_key=_api_key, temperature=0.2)
 
 
+@st.cache_data(show_spinner=False)
+def get_product_list(_vector_store):
+    """Fetch the distinct product names stored in the vector DB (for the product picker)."""
+    try:
+        result = _vector_store.get(include=["metadatas"])
+        names = {
+            (m.get("product") or "").strip()
+            for m in result.get("metadatas", [])
+        }
+        names.discard("")
+        names.discard("Unknown")
+        return sorted(names)
+    except Exception:
+        return []
+
+
+def retrieve(vector_store, query, product_filter=None, k=TOP_K):
+    if product_filter and product_filter != ALL_PRODUCTS_LABEL:
+        try:
+            return vector_store.similarity_search(query, k=k, filter={"product": product_filter})
+        except Exception:
+            pass
+    return vector_store.similarity_search(query, k=k)
+
+
 # ==========================================
-# RAG logic
+# RAG / prompting logic
 # ==========================================
 def build_grounded_prompt(query, docs):
     if not docs:
@@ -229,6 +277,18 @@ Customer review excerpts:
 Answer:"""
 
 
+def translate_to_arabic(text, _api_key):
+    """One-shot translation of an existing English answer into Arabic using the same LLM."""
+    llm = load_llm(_api_key)
+    prompt = (
+        "Translate the following text into natural, fluent Arabic. "
+        "Return ONLY the Arabic translation, nothing else.\n\n"
+        f"Text:\n{text}"
+    )
+    response = llm.invoke(prompt)
+    return response.content
+
+
 # ==========================================
 # Sidebar
 # ==========================================
@@ -245,18 +305,33 @@ with st.sidebar:
     else:
         st.error("Groq API Key Missing", icon="🚨")
 
-    retriever = load_retriever()
+    vector_store = load_vector_store()
 
-    if retriever is not None:
+    if vector_store is not None:
         st.success("Vector DB Ready", icon="🗄️")
     else:
         st.error("Vector DB / Data Missing", icon="⚠️")
 
     st.markdown("---")
+
+    # --- Product picker ---
+    st.markdown("### 🔎 Ask about a specific product")
+    product_options = [ALL_PRODUCTS_LABEL]
+    if vector_store is not None:
+        product_options += get_product_list(vector_store)
+    selected_product = st.selectbox(
+        "Product filter (optional)",
+        options=product_options,
+        index=0,
+        label_visibility="collapsed",
+    )
+
+    st.markdown("---")
     st.markdown("### 💡 Quick Tips")
     st.info(
         "• Ask about **battery life**, **screen quality**, or **build performance**.\n\n"
-        "• The system relies **strictly** on verified Amazon customer reviews."
+        "• The system relies **strictly** on verified Amazon customer reviews.\n\n"
+        "• Every answer can be translated to Arabic with one click."
     )
 
 # ==========================================
@@ -269,11 +344,11 @@ st.markdown(
 )
 
 # ==========================================
-# Validation & Chat
+# Validation
 # ==========================================
 if not api_key:
     st.warning("⚠️ **System not ready:** add `GROQ_API_KEY` in Streamlit Cloud → Settings → Secrets.")
-elif retriever is None:
+elif vector_store is None:
     st.error(
         "⚠️ **Database error:** no `data/chroma_db`, `data.zip`, or CSV file was found. "
         "Make sure one of these is included in the repo's `data/` folder."
@@ -281,16 +356,56 @@ elif retriever is None:
 else:
     if "messages" not in st.session_state:
         st.session_state.messages = []
+    if "pending_prompt" not in st.session_state:
+        st.session_state.pending_prompt = None
 
-    for message in st.session_state.messages:
+    # --- Suggested / guiding questions (shown only before the first message) ---
+    if not st.session_state.messages:
+        st.markdown('<div class="try-asking-label">TRY ASKING</div>', unsafe_allow_html=True)
+
+        if selected_product != ALL_PRODUCTS_LABEL:
+            suggestions = [
+                f"What is the percentage of 5-star reviews for {selected_product}?",
+                f"What do customers complain about most for {selected_product}?",
+                f"Do customers recommend {selected_product}?",
+                f"Summarize the overall sentiment for {selected_product}",
+            ]
+        else:
+            suggestions = SUGGESTED_QUESTIONS_GENERAL
+
+        cols = st.columns(2)
+        for i, q in enumerate(suggestions):
+            with cols[i % 2]:
+                if st.button(q, key=f"suggestion_{i}", use_container_width=True):
+                    st.session_state.pending_prompt = q
+                    st.rerun()
+
+    # --- Render chat history ---
+    for i, message in enumerate(st.session_state.messages):
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
+
             if message.get("sources"):
                 with st.expander("🔍 View retrieved review excerpts"):
                     for idx, src in enumerate(message["sources"], 1):
                         st.markdown(f"**Excerpt {idx}:**\n> {src.page_content}")
 
-    if user_query := st.chat_input("Ask a question about Amazon products (e.g., How is the battery life?)..."):
+            if message["role"] == "assistant" and message["content"] != "Insufficient information.":
+                if message.get("ar_translation"):
+                    st.markdown("---")
+                    st.markdown(f"🌐 **Arabic:**\n\n{message['ar_translation']}")
+                else:
+                    if st.button("🌐 Translate to Arabic", key=f"translate_{i}"):
+                        with st.spinner("Translating..."):
+                            message["ar_translation"] = translate_to_arabic(message["content"], api_key)
+                        st.rerun()
+
+    # --- Chat input (typed OR triggered by a suggested question) ---
+    typed_query = st.chat_input("Ask a question about Amazon products (e.g., How is the battery life?)...")
+    user_query = typed_query or st.session_state.pending_prompt
+    st.session_state.pending_prompt = None
+
+    if user_query:
         st.session_state.messages.append({"role": "user", "content": user_query})
         with st.chat_message("user"):
             st.markdown(user_query)
@@ -298,7 +413,7 @@ else:
         with st.chat_message("assistant"):
             with st.spinner("Analyzing customer reviews..."):
                 try:
-                    docs = retriever.invoke(user_query)
+                    docs = retrieve(vector_store, user_query, product_filter=selected_product)
                     prompt = build_grounded_prompt(user_query, docs)
 
                     if prompt is None:
@@ -321,7 +436,9 @@ else:
                         "role": "assistant",
                         "content": response_text,
                         "sources": sources,
+                        "ar_translation": None,
                     })
+                    st.rerun()
 
                 except Exception as e:
                     st.error(f"An unexpected error occurred: {e}")
