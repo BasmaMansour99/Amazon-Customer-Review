@@ -54,12 +54,13 @@ def prepare_chroma_db():
 
     # 2. Extract data.zip if present
     if os.path.exists(ZIP_PATH):
-        with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
-            zip_ref.extractall(BASE_DIR)
-        
-        # Check if DB was extracted inside
-        if os.path.exists(DB_PATH) and len(os.listdir(DB_PATH)) > 0:
-            return DB_PATH
+        try:
+            with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
+                zip_ref.extractall(BASE_DIR)
+            if os.path.exists(DB_PATH) and len(os.listdir(DB_PATH)) > 0:
+                return DB_PATH
+        except Exception:
+            pass
 
     # 3. Build Vector DB from CSV files in DATA_DIR
     csv_files = [f for f in os.listdir(DATA_DIR) if f.endswith('.csv')] if os.path.exists(DATA_DIR) else []
@@ -67,21 +68,28 @@ def prepare_chroma_db():
         st.info("⚡ First time setup: Building Vector Database from CSVs... Please wait.")
         embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
         documents = []
+        
         for file in csv_files:
             file_path = os.path.join(DATA_DIR, file)
-            df = pd.read_csv(file_path)
-            text_column = next((col for col in ['review_body', 'text', 'review', 'content'] if col in df.columns), df.columns[0])
+            df = pd.read_csv(file_path, low_memory=False)
+            
+            # Common text columns in Amazon Datasets
+            possible_cols = ['reviews.text', 'review_body', 'text', 'review', 'content', 'reviews.title']
+            text_column = next((col for col in possible_cols if col in df.columns), df.columns[0])
+            
             for _, row in df.iterrows():
-                text = str(row[text_column])
+                text = str(row[text_column]) if pd.notna(row[text_column]) else ""
                 if len(text.strip()) > 0:
                     documents.append(Document(page_content=text))
         
-        vector_store = Chroma.from_documents(
-            documents=documents,
-            embedding=embedding_model,
-            persist_directory=DB_PATH
-        )
-        return DB_PATH
+        if documents:
+            vector_store = Chroma.from_documents(
+                documents=documents,
+                embedding=embedding_model,
+                persist_directory=DB_PATH
+            )
+            return DB_PATH
+            
     return None
 
 # ==========================================
@@ -174,7 +182,7 @@ st.markdown('<div class="sub-title">AI-Powered Insights Grounded Strictly in Rea
 if not api_key:
     st.warning("⚠️ **System Not Ready:** Please configure `GEMINI_API_KEY` in Streamlit Cloud Secrets to proceed.")
 elif retriever is None:
-    st.error("⚠️ **Database Error:** Could not initialize Chroma DB. Extracting data.zip failed or contains no valid files.")
+    st.error("⚠️ **Database Error:** Could not initialize Chroma DB. Please ensure CSV file is in data folder.")
 else:
     if "messages" not in st.session_state:
         st.session_state.messages = []
