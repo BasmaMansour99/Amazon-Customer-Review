@@ -57,7 +57,7 @@ REQUIRED_COLUMNS = [
 
 # Suggested reference questions grounded in dataset contents
 SUGGESTED_QUESTIONS_GENERAL = [
-    "What do parents say about the Fire Kids Edition Tablet?",
+    "What is the battery life like for Kindle Paperwhite?",
     "How do users describe the screen and reading experience on Kindle Paperwhite?",
     "What are the main complaints regarding battery life or SD cards on Fire Tablets?",
     "How is Alexa used on Amazon Echo and Amazon Tap devices?",
