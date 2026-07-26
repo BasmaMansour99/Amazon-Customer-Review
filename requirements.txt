@@ -9,3 +9,10 @@ langchain-huggingface
 langchain-chroma
 chromadb
 langchain-google-genai
+streamlit
+langchain
+langchain-core
+langchain-community
+langchain-groq
+sentence-transformers
+pysqlite3-binary
