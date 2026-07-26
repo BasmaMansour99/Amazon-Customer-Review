@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 import os
+import zipfile
+import pandas as pd
 import streamlit as st
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.documents import Document
 
 # ==========================================
 # Page Configuration & Custom UI Theme
@@ -15,50 +18,17 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for Professional Styling
 st.markdown("""
 <style>
-    /* Clean background & typography */
-    .main {
-        background-color: #0f172a;
-        color: #f8fafc;
-    }
-    
-    /* Custom Header Styling */
+    .main { background-color: #0f172a; color: #f8fafc; }
     .main-title {
-        font-size: 2.2rem;
-        font-weight: 700;
+        font-size: 2.2rem; font-weight: 700;
         background: linear-gradient(90deg, #ff9900, #ffb84d);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         margin-bottom: 0.2rem;
     }
-    
-    .sub-title {
-        color: #94a3b8;
-        font-size: 1rem;
-        margin-bottom: 2rem;
-    }
-    
-    /* Card Styles */
-    .metric-card {
-        background-color: #1e293b;
-        border: 1px solid #334155;
-        border-radius: 12px;
-        padding: 1rem 1.2rem;
-        margin-bottom: 1rem;
-    }
-    
-    /* Source Context Box */
-    .source-box {
-        background-color: #1e293b;
-        border-left: 4px solid #ff9900;
-        padding: 10px 15px;
-        border-radius: 4px;
-        font-size: 0.88rem;
-        color: #cbd5e1;
-        margin-top: 10px;
-    }
+    .sub-title { color: #94a3b8; font-size: 1rem; margin-bottom: 2rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -66,35 +36,71 @@ st.markdown("""
 # Configuration & Local Paths
 # ==========================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_PATH = os.path.abspath(os.path.join(BASE_DIR, ".."))
-DB_PATH = os.path.join(PROJECT_PATH, "data", "chroma_db")
+DATA_DIR = os.path.join(BASE_DIR, "data")
+DB_PATH = os.path.join(DATA_DIR, "chroma_db")
+ZIP_PATH = os.path.join(BASE_DIR, "data.zip")
 TOP_K = 5
 
-api_key = st.secrets.get("OPENROUTER_API_KEY", os.getenv("OPENROUTER_API_KEY"))
+api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY"))
+
+# Auto Extract / Build DB Helper Function
+def prepare_chroma_db():
+    if os.path.exists(DB_PATH):
+        return DB_PATH
+    
+    # 1. Unzip if data.zip exists
+    if os.path.exists(ZIP_PATH):
+        with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
+            zip_ref.extractall(BASE_DIR)
+        if os.path.exists(DB_PATH):
+            return DB_PATH
+
+    # 2. If no pre-built DB, build it from CSV files in data directory
+    csv_files = [f for f in os.listdir(DATA_DIR) if f.endswith('.csv')] if os.path.exists(DATA_DIR) else []
+    if csv_files:
+        st.info("⚡ First time setup: Building Vector Database... Please wait.")
+        embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        documents = []
+        for file in csv_files:
+            file_path = os.path.join(DATA_DIR, file)
+            df = pd.read_csv(file_path)
+            text_column = next((col for col in ['review_body', 'text', 'review', 'content'] if col in df.columns), df.columns[0])
+            for _, row in df.iterrows():
+                text = str(row[text_column])
+                if len(text.strip()) > 0:
+                    documents.append(Document(page_content=text))
+        
+        vector_store = Chroma.from_documents(
+            documents=documents,
+            embedding=embedding_model,
+            persist_directory=DB_PATH
+        )
+        return DB_PATH
+    return None
 
 # ==========================================
 # Load Models & Retriever (Cached)
 # ==========================================
 @st.cache_resource
 def load_retriever():
-    if not os.path.exists(DB_PATH):
+    actual_db_path = prepare_chroma_db()
+    if not actual_db_path or not os.path.exists(actual_db_path):
         return None
         
     embedding_model = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
     vector_store = Chroma(
-        persist_directory=DB_PATH,
+        persist_directory=actual_db_path,
         embedding_function=embedding_model
     )
     return vector_store.as_retriever(search_kwargs={"k": TOP_K})
 
 @st.cache_resource
 def load_llm(api_key):
-    return ChatOpenAI(
-        model="openai/gpt-4o-mini",
-        api_key=api_key,
-        base_url="https://openrouter.ai/api/v1"
+    return ChatGoogleGenerativeAI(
+        model="gemini-1.5-flash",
+        google_api_key=api_key
     )
 
 # ==========================================
@@ -104,17 +110,16 @@ with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/a/a9/Amazon_logo.svg", width=140)
     st.markdown("### 📊 System Status")
     
-    # API Status Check
     if api_key:
-        st.success("🟢 API Key Connected", icon="✅")
+        st.success("🟢 Gemini API Connected", icon="✅")
     else:
         st.error("🔴 API Key Missing", icon="🚨")
         
-    # Database Status Check
-    if os.path.exists(DB_PATH):
-        st.success("🟢 Vector DB Active", icon="🗄️")
+    db_active = os.path.exists(DB_PATH) or os.path.exists(ZIP_PATH)
+    if db_active:
+        st.success("🟢 Vector DB Ready", icon="🗄️")
     else:
-        st.error("🔴 Vector DB Not Found", icon="⚠️")
+        st.error("🔴 Vector DB Missing", icon="⚠️")
 
     st.markdown("---")
     st.markdown("### 💡 Quick Tips")
@@ -162,15 +167,13 @@ retriever = load_retriever()
 
 # Validation Checks
 if not api_key:
-    st.warning("⚠️ **System Not Ready:** Please configure `OPENROUTER_API_KEY` in `.streamlit/secrets.toml` to proceed.")
+    st.warning("⚠️ **System Not Ready:** Please configure `GEMINI_API_KEY` in Streamlit Cloud Secrets to proceed.")
 elif retriever is None:
-    st.error(f"⚠️ **Database Error:** Could not locate Chroma DB at `{DB_PATH}`. Please create the embeddings first.")
+    st.error("⚠️ **Database Error:** Could not initialize Chroma DB. Make sure data files exist in `data/` directory or `data.zip` is present.")
 else:
-    # Initialize Chat History
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Display Chat History
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
@@ -179,14 +182,11 @@ else:
                     for idx, src in enumerate(message["sources"], 1):
                         st.markdown(f"**Excerpt {idx}:**\n> {src.page_content}")
 
-    # Chat Input
     if user_query := st.chat_input("Ask a question about Amazon products (e.g., How is the battery life?)..."):
-        # Add User Message to History
         st.session_state.messages.append({"role": "user", "content": user_query})
         with st.chat_message("user"):
             st.markdown(user_query)
 
-        # Generate Response
         with st.chat_message("assistant"):
             with st.spinner("Analyzing customer reviews..."):
                 try:
@@ -204,13 +204,11 @@ else:
 
                     st.markdown(response_text)
                     
-                    # Display Sources in Expander
                     if sources:
                         with st.expander("🔍 View Retrieved Review Excerpts"):
                             for idx, src in enumerate(sources, 1):
                                 st.markdown(f"**Excerpt {idx}:**\n> {src.page_content}")
 
-                    # Save Assistant Response to History
                     st.session_state.messages.append({
                         "role": "assistant", 
                         "content": response_text,
