@@ -18,15 +18,10 @@ import zipfile
 # ==========================================
 # SQLite fix (REQUIRED on Streamlit Cloud)
 # --------------------------------------------
-# Streamlit Cloud ships an old system sqlite3 that chromadb rejects.
-# pysqlite3-binary provides a modern build; we swap it in before chromadb
-# is imported anywhere. This must be the very first thing that runs.
-# ==========================================
 try:
     __import__("pysqlite3")
     sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
 except ImportError:
-    # Running locally on a machine with a modern sqlite3 is fine too.
     pass
 
 import pandas as pd
@@ -44,11 +39,14 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 DB_PATH = os.path.join(DATA_DIR, "chroma_db")
 ZIP_PATH = os.path.join(BASE_DIR, "data.zip")
+
+# مسارات اللوجو المتاحة
 LOGO_PATH = os.path.join(BASE_DIR, "assets", "logo.png")
+LOGO_ROOT_PATH = os.path.join(BASE_DIR, "logo.png")
 
 TOP_K = 5
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-GROQ_MODEL_NAME = "llama-3.3-70b-versatile"   # change here if you prefer another Groq model
+GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
 ALL_PRODUCTS_LABEL = "All products"
 
 REQUIRED_COLUMNS = [
@@ -64,12 +62,21 @@ SUGGESTED_QUESTIONS_GENERAL = [
     "What percentage of reviews are 5-star overall?",
 ]
 
+def get_logo_path():
+    if os.path.exists(LOGO_PATH):
+        return LOGO_PATH
+    elif os.path.exists(LOGO_ROOT_PATH):
+        return LOGO_ROOT_PATH
+    return None
+
+active_logo = get_logo_path()
+
 # ==========================================
 # Page Configuration & Theme
 # ==========================================
 st.set_page_config(
-    page_title="Amazon Intelligence Assistant",
-    page_icon=LOGO_PATH if os.path.exists(LOGO_PATH) else "🛒",
+    page_title="Amazon Review Analyzer",
+    page_icon=active_logo if active_logo else "🛒",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -115,8 +122,7 @@ st.markdown("""
 api_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
 
 # ==========================================
-# Helper: build LangChain Documents from a dataframe row
-# (kept consistent with the offline pipeline scripts 1_doc.py / 3_chunking.py)
+# Helper Functions
 # ==========================================
 def row_to_document(row) -> Document:
     def g(col, default="Unknown"):
@@ -153,18 +159,7 @@ def build_documents_from_csv(csv_path: str):
     return [row_to_document(row) for _, row in df.iterrows()]
 
 
-# ==========================================
-# Prepare / load the Chroma vector database
-# ==========================================
 def prepare_chroma_db(embedding_model):
-    """
-    Resolution order:
-      1) Use an already-built chroma_db folder if present.
-      2) Unzip data.zip (expected to contain data/chroma_db) if present.
-      3) Otherwise, build the DB from any CSV found in /data
-         (prefers cleaned_data.csv).
-    Returns the persist directory path, or None if nothing could be prepared.
-    """
     if os.path.exists(DB_PATH) and len(os.listdir(DB_PATH)) > 0:
         return DB_PATH
 
@@ -204,7 +199,7 @@ def prepare_chroma_db(embedding_model):
 
 
 # ==========================================
-# Cached resources
+# Cached Resources
 # ==========================================
 @st.cache_resource(show_spinner=False)
 def load_embedding_model():
@@ -227,7 +222,6 @@ def load_llm(_api_key):
 
 @st.cache_data(show_spinner=False)
 def get_product_list(_vector_store):
-    """Fetch the distinct product names stored in the vector DB (for the product picker)."""
     try:
         result = _vector_store.get(include=["metadatas"])
         names = {
@@ -250,9 +244,6 @@ def retrieve(vector_store, query, product_filter=None, k=TOP_K):
     return vector_store.similarity_search(query, k=k)
 
 
-# ==========================================
-# RAG / prompting logic
-# ==========================================
 def build_grounded_prompt(query, docs):
     if not docs:
         return None
@@ -278,7 +269,6 @@ Answer:"""
 
 
 def translate_to_arabic(text, _api_key):
-    """One-shot translation of an existing English answer into Arabic using the same LLM."""
     llm = load_llm(_api_key)
     prompt = (
         "Translate the following text into natural, fluent Arabic. "
@@ -293,11 +283,18 @@ def translate_to_arabic(text, _api_key):
 # Sidebar
 # ==========================================
 with st.sidebar:
-    if os.path.exists(LOGO_PATH):
-        st.image(LOGO_PATH, use_container_width=True)
+    if active_logo:
+        st.image(active_logo, use_container_width=True)
     else:
         st.image("https://upload.wikimedia.org/wikipedia/commons/a/a9/Amazon_logo.svg", width=140)
 
+    # زر New Chat إعادة تعيين المحادثة
+    if st.button("➕ New Chat", use_container_width=True):
+        st.session_state.messages = []
+        st.session_state.pending_prompt = None
+        st.rerun()
+
+    st.markdown("---")
     st.markdown("### 📊 System Status")
 
     if api_key:
@@ -314,7 +311,6 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # --- Product picker ---
     st.markdown("### 🔎 Ask about a specific product")
     product_options = [ALL_PRODUCTS_LABEL]
     if vector_store is not None:
@@ -337,14 +333,14 @@ with st.sidebar:
 # ==========================================
 # Main Header
 # ==========================================
-st.markdown('<div class="main-title">🛒 Amazon Product RAG Intelligence</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🛒 Amazon Review Analyzer</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="sub-title">AI-Powered Insights Grounded Strictly in Real Customer Reviews</div>',
+    '<div class="sub-title">Analyze. Understand. Improve. Grounded Strictly in Real Customer Reviews</div>',
     unsafe_allow_html=True,
 )
 
 # ==========================================
-# Validation
+# Validation & Chat Loop
 # ==========================================
 if not api_key:
     st.warning("⚠️ **System not ready:** add `GROQ_API_KEY` in Streamlit Cloud → Settings → Secrets.")
@@ -359,8 +355,13 @@ else:
     if "pending_prompt" not in st.session_state:
         st.session_state.pending_prompt = None
 
-    # --- Suggested / guiding questions (shown only before the first message) ---
+    # الصفحة الرئيسية قبل بدء المحادثة
     if not st.session_state.messages:
+        if active_logo:
+            col_a, col_b, col_c = st.columns([1, 2, 1])
+            with col_b:
+                st.image(active_logo, width=280)
+
         st.markdown('<div class="try-asking-label">TRY ASKING</div>', unsafe_allow_html=True)
 
         if selected_product != ALL_PRODUCTS_LABEL:
@@ -380,7 +381,7 @@ else:
                     st.session_state.pending_prompt = q
                     st.rerun()
 
-    # --- Render chat history ---
+    # عرض سجّل المحادثة
     for i, message in enumerate(st.session_state.messages):
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
@@ -400,7 +401,7 @@ else:
                             message["ar_translation"] = translate_to_arabic(message["content"], api_key)
                         st.rerun()
 
-    # --- Chat input (typed OR triggered by a suggested question) ---
+    # إدخال السؤال
     typed_query = st.chat_input("Ask a question about Amazon products (e.g., How is the battery life?)...")
     user_query = typed_query or st.session_state.pending_prompt
     st.session_state.pending_prompt = None
