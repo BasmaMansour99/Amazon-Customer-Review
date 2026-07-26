@@ -8,4 +8,4 @@ langchain-text-splitters
 langchain-huggingface
 langchain-chroma
 chromadb
-langchain-openai
+langchain-google-genai
