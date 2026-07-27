@@ -57,24 +57,28 @@ SUGGESTED_QUESTIONS_GENERAL = [
 
 TEAM_MEMBERS = [
     {
-        "name": "Basma Mansour",
+        "name": "Basma Mansour Hussien",
         "title": "Assistant Lecturer | Data Analyst | AI & Machine Learning | Deep Learning | Python, SQL, Excel | Power BI, Tableau | Azure | Financial Management",
         "image_filename": "basma.png",
+        "portfolio": "https://basma-insight-bloom.lovable.app/",
     },
     {
-        "name": "Radwa El-Mahdy",
+        "name": "Radwa Elsayed Elashry",
         "title": "Applied AI & Data Analytics Scholar | Senior Financial Professional | Digilians • MCIT | Transforming Financial Data into Strategic Intelligence | Python | SQL",
         "image_filename": "radwa.png",
+        "portfolio": "https://showcase-my-style-23.lovable.app/",
     },
     {
         "name": "Marwa Baraka",
         "title": "Data Analytics & Applied AI | Junior Data Analyst | Python | Power BI | SQL | Passionate About Turning Data Into Insights",
         "image_filename": "marwa.png",
+        "portfolio": "https://data-dreamhouse.lovable.app/",
     },
     {
-        "name": "Shorouk Khaled",
-        "title": "Data Analyst skilled in Python | SQL | Power BI",
+        "name": "Shrouk Khaled Ezzat",
+        "title": "Data Analyst & Power BI Specialist | Python | SQL",
         "image_filename": "shorouk.png",
+        "portfolio": "https://shroukelerefy.vercel.app/",
     },
 ]
 
@@ -363,8 +367,13 @@ if app_mode == "👥 Meet the Team":
                     st.image(img_path, use_container_width=True)
                 else:
                     st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=120)
+                
                 st.markdown(f'<div class="team-name">{member["name"]}</div>', unsafe_allow_html=True)
                 st.markdown(f'<div class="team-title">{member["title"]}</div>', unsafe_allow_html=True)
+                
+                if member.get("portfolio"):
+                    st.markdown("<div style='margin-top: 12px;'></div>", unsafe_allow_html=True)
+                    st.link_button("🌐 View Portfolio", member["portfolio"], use_container_width=True)
 
 else:
     # Chat Mode Validation
