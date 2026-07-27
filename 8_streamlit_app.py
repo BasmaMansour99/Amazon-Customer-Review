@@ -393,11 +393,10 @@ else:
                 st.markdown('<div class="sub-title">Insights that ignite better decisions. Ask questions grounded strictly in real customer reviews.</div>', unsafe_allow_html=True)
 
             # Display Stats (Metrics similar to the reference image)
-            m1, m2, m3, m4 = st.columns(4)
+            m1, m2, m3, m4 = st.columns(3)
             m1.metric(label="Evidence sources", value="34,000+")
             m2.metric(label="Searchable chunks", value="Vector DB")
             m3.metric(label="Sentiment Overview", value="85% Pos")
-            m4.metric(label="Answer mode", value="Grounded")
             
             st.markdown('<div class="try-asking-label">ASK THE EVIDENCE</div>', unsafe_allow_html=True)
 
