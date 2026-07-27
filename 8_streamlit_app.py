@@ -175,12 +175,14 @@ st.markdown("""
         color: #cbd5e1;
         line-height: 1.4;
     }
-    /* Banner image styling */
-    .banner-container img {
-        border-radius: 16px;
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
-        margin-bottom: 2rem;
-    }
+/* Banner image styling */
+.banner-container img {
+    border-radius: 16px;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+    margin: 0 auto 2rem auto;
+    max-width: 60%; 
+    display: block;
+}
 </style>
 """, unsafe_allow_html=True)
 
