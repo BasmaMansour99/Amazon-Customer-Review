@@ -179,6 +179,12 @@ st.markdown("""
         color: #cbd5e1;
         line-height: 1.4;
     }
+    div[data-testid="stImage"] img {
+        border-radius: 12px;
+        object-fit: cover;
+    }
+/* Banner image styling */
+.banner-container img {
 /* Banner image styling */
 .banner-container img {
     border-radius: 16px;
@@ -362,14 +368,16 @@ if app_mode == "👥 Meet the Team":
         target_col = col1 if idx % 2 == 0 else col2
         with target_col:
             with st.container(border=True):
-                img_path = get_member_image_path(member["image_filename"])
-                if img_path:
-                    st.image(img_path, use_container_width=True)
-                else:
-                    st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=120)
+                c_left, c_mid, c_right = st.columns([1, 2, 1])
+                with c_mid:
+                    img_path = get_member_image_path(member["image_filename"])
+                    if img_path:
+                        st.image(img_path, width=140)
+                    else:
+                        st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=120)
                 
-                st.markdown(f'<div class="team-name">{member["name"]}</div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="team-title">{member["title"]}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="team-name" style="text-align: center;">{member["name"]}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="team-title" style="text-align: center; font-size: 0.85rem;">{member["title"]}</div>', unsafe_allow_html=True)
                 
                 if member.get("portfolio"):
                     st.markdown("<div style='margin-top: 12px;'></div>", unsafe_allow_html=True)
