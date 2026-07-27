@@ -357,15 +357,14 @@ if app_mode == "👥 Meet the Team":
     for idx, member in enumerate(TEAM_MEMBERS):
         target_col = col1 if idx % 2 == 0 else col2
         with target_col:
-            st.markdown('<div class="team-card">', unsafe_allow_html=True)
-            img_path = get_member_image_path(member["image_filename"])
-            if img_path:
-                st.image(img_path, width=220)
-            else:
-                st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=120)
-            st.markdown(f'<div class="team-name">{member["name"]}</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="team-title">{member["title"]}</div>', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+            with st.container(border=True):
+                img_path = get_member_image_path(member["image_filename"])
+                if img_path:
+                    st.image(img_path, use_container_width=True)
+                else:
+                    st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=120)
+                st.markdown(f'<div class="team-name">{member["name"]}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="team-title">{member["title"]}</div>', unsafe_allow_html=True)
 
 else:
     # Chat Mode Validation
